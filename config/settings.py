@@ -98,7 +98,9 @@ SIMPLE_JWT = {
 
 CORS_ALLOW_ALL_ORIGINS = True 
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'static')
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 MEDIA_URL = '/media/'
