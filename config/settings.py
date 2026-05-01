@@ -62,7 +62,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 # CRITICAL FIX: Point ASGI application to the configured asgi.py
-ASGI_APPLICATION = 'slopara.asgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
 
 # Configure Channel Layers for WebSocket Broadcasting
 # (Swap to RedisChannelLayer in Production)
@@ -99,9 +99,10 @@ SIMPLE_JWT = {
 CORS_ALLOW_ALL_ORIGINS = True 
 
 STATIC_URL = '/static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'static')
+
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_ROOT = BASE_DIR / 'media'
