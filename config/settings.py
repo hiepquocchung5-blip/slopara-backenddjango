@@ -24,7 +24,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
-    'channels', # Added Channels
+    'channels',
     
     'users',
     'game',
@@ -42,6 +42,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+# This proves your main folder is named "config"
 ROOT_URLCONF = 'config.urls'
 
 TEMPLATES = [
@@ -61,11 +62,9 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
-# CRITICAL FIX: Point ASGI application to the configured asgi.py
+# CRITICAL FIX: This MUST match the ROOT_URLCONF folder name (config)
 ASGI_APPLICATION = 'config.asgi.application'
 
-# Configure Channel Layers for WebSocket Broadcasting
-# (Swap to RedisChannelLayer in Production)
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels.layers.InMemoryChannelLayer"
@@ -98,11 +97,11 @@ SIMPLE_JWT = {
 
 CORS_ALLOW_ALL_ORIGINS = True 
 
+# CRITICAL FIX: Safe Pathlib routing for static/media files in Docker
 STATIC_URL = '/static/'
-
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
