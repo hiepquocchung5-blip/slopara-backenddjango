@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:15-alpine
@@ -7,7 +5,8 @@ services:
     environment:
       POSTGRES_DB: slopara
       POSTGRES_USER: slopara_user
-      POSTGRES_PASSWORD: SloparaDjango1May@!
+      # Wrapped in quotes to prevent YAML parsing errors with the '!' character
+      POSTGRES_PASSWORD: "SloparaDjango1May@!"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -18,9 +17,8 @@ services:
   backend:
     build: .
     restart: always
-   command: >
-      sh -c "python manage.py migrate && 
-             daphne -b 0.0.0.0 -p 8000 config.asgi:application"
+    # Formatted onto a single line to prevent indentation mapping errors
+    command: sh -c "python manage.py migrate && daphne -b 0.0.0.0 -p 8000 config.asgi:application"
     volumes:
       - .:/app
     ports:
