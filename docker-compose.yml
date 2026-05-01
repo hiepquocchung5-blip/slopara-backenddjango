@@ -16,8 +16,8 @@ services:
   backend:
     build: .
     restart: always
-    # CRITICAL FIX: Changed config.asgi to slopara.asgi to match your file structure
-    command: sh -c "python manage.py migrate && daphne -b 0.0.0.0 -p 8000 slopara.asgi:application"
+    # CRITICAL FIX: Changed 'slopara.asgi' back to 'config.asgi' so Daphne doesn't crash
+    command: sh -c "python manage.py migrate && daphne -b 0.0.0.0 -p 8000 config.asgi:application"
     volumes:
       - .:/app
     ports:
