@@ -3,9 +3,9 @@ import re
 def validate_and_identify_operator(phone):
     """
     Validates Myanmar phone number and returns the operator.
-    Rejects 0911 and 0922 prefixes explicitly.
-    Expected formats handled: 959XXXXXXXX, +959XXXXXXXX, 09XXXXXXXX.
+    Relaxed for development to allow testing with generic 09 numbers.
     """
+    # 1. Strip the prefix safely
     if phone.startswith('+959'):
         phone = phone[4:]
     elif phone.startswith('959'):
@@ -13,11 +13,13 @@ def validate_and_identify_operator(phone):
     elif phone.startswith('09'):
         phone = phone[2:]
     else:
-        return False, "Invalid format. Must start with 09 or 959."
+        return False, "Phone number must start with 09, 959, or +959."
 
-    if phone.startswith('11') or phone.startswith('22'):
-        return False, "Prefix not allowed."
+    # 2. Basic length validation (7 to 9 digits after prefix is standard)
+    if not re.match(r'^\d{7,9}$', phone):
+        return False, "Invalid phone number length. Must be 9 to 11 digits total."
 
+    # 3. Identify Operator (Optional, defaults to Unknown/Test)
     operators = {
         'Ooredoo/U9': r'^(94|95|96|97)\d{7}$',
         'Telenor/Atom': r'^(76|77|78|79)\d{7}$',
@@ -25,9 +27,12 @@ def validate_and_identify_operator(phone):
         'Mytel': r'^(66|67|68|69)\d{7}$'
     }
 
-    for operator, pattern in operators.items():
+    operator_name = "Unknown / Test Network"
+    for op_name, pattern in operators.items():
         if re.match(pattern, phone):
-            normalized_phone = f"09{phone}"
-            return True, {"operator": operator, "normalized": normalized_phone}
+            operator_name = op_name
+            break
             
-    return False, "Unknown or invalid operator prefix."
+    # 4. Standardize format to 09XXXXXXXX for database consistency
+    normalized_phone = f"09{phone}"
+    return True, {"operator": operator_name, "normalized": normalized_phone}
