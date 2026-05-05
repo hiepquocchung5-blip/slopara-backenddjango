@@ -16,7 +16,9 @@ class IslandSerializer(serializers.ModelSerializer):
 
     def get_is_unlocked(self, obj):
         user = self.context['request'].user
-        return user.lifetime_deposit >= obj.min_lifetime_deposit
+        if not getattr(user, 'is_authenticated', False):
+            return False
+        return getattr(user, 'lifetime_deposit', 0) >= obj.min_lifetime_deposit
 
 class MachineSerializer(serializers.ModelSerializer):
     class Meta:

@@ -5,11 +5,12 @@ from .views import (
     LeaderboardView, DailyBonusClaimView, BankerPlayerListView, BankerPlayerToggleBanView,
     ReferralDashboardView
 )
+from .serializers import SingleDeviceTokenSerializer
 
 urlpatterns = [
     # Authentication endpoints
     path('register/', RegisterView.as_view(), name='auth_register'),
-    path('login/', TokenObtainPairView.as_view(), name='auth_login'),
+    path('login/', TokenObtainPairView.as_view(serializer_class=SingleDeviceTokenSerializer), name='auth_login'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     
     # Profile, Referrals & Retention
