@@ -1,5 +1,4 @@
 import logging
-from datetime import timedelta
 from decimal import Decimal
 
 from rest_framework import generics, status
@@ -9,7 +8,7 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.pagination import PageNumberPagination
 
-from django.db import transaction
+from django.db import transaction, OperationalError
 from django.db.models import Sum, Count, F
 from django.utils import timezone
 
@@ -22,27 +21,19 @@ from .utils import process_spin
 
 logger = logging.getLogger(__name__)
 
-# ==============================================================================
-# ANTI-CHEAT & THROTTLING
-# ==============================================================================
 class SpinRateThrottle(UserRateThrottle):
-    """Protects the math engine from auto-clicker scripts & replay attacks."""
     scope = 'spin'
-    rate = '2/second' # Allowed slight burst for fast taps, mathematically safe
-
+    rate = '3/second' # Increased slightly to allow fast physical taps, DB locks will handle the rest
 
 # ==============================================================================
 # CASINO FLOOR & MACHINE MANAGEMENT
 # ==============================================================================
 class IslandListView(generics.ListAPIView):
-    """Retrieves all islands with their live GJP values pre-fetched."""
     queryset = Island.objects.select_related('gjp_pool').all().order_by('min_lifetime_deposit')
     serializer_class = IslandSerializer
     permission_classes = [IsAuthenticated]
 
-
 class IslandMachinesView(generics.ListAPIView):
-    """Retrieves the layout of a specific floor."""
     serializer_class = MachineSerializer
     permission_classes = [IsAuthenticated]
     
@@ -52,9 +43,7 @@ class IslandMachinesView(generics.ListAPIView):
             floor=self.request.query_params.get('floor', 1)
         ).order_by('machine_number')
 
-
 class ActiveSessionView(APIView):
-    """Allows frontend to check if a user is already seated upon app reload."""
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
@@ -67,30 +56,25 @@ class ActiveSessionView(APIView):
             })
         return Response({"active_machine": None})
 
-
 class MachineEnterView(APIView):
-    """Claims a machine. Handles Ghost Eviction for disconnected players."""
     permission_classes = [IsAuthenticated]
     
     @transaction.atomic
     def post(self, request, machine_id):
         try:
-            machine = Machine.objects.select_for_update().get(id=machine_id)
+            machine = Machine.objects.select_for_update(nowait=True).get(id=machine_id)
             now = timezone.now()
 
-            # Ghost Eviction Logic: If occupied but dead for > 60s, clear the lock
             if machine.is_occupied and machine.current_player != request.user:
                 if machine.last_ping and (now - machine.last_ping).total_seconds() > 60:
                     logger.info(f"Evicting ghost user {machine.current_player_id} from Machine {machine.id}")
                 else:
                     return Response({"error": "Machine is currently occupied."}, status=status.HTTP_409_CONFLICT)
             
-            # Ensure the user isn't occupying multiple machines
             Machine.objects.filter(current_player=request.user).update(
                 is_occupied=False, current_player=None, last_ping=None
             )
 
-            # Lock the new machine
             machine.is_occupied = True
             machine.current_player = request.user
             machine.last_ping = now
@@ -101,52 +85,43 @@ class MachineEnterView(APIView):
                 {'type': 'machine_update', 'machine_id': machine.id, 'is_occupied': True}
             )
             return Response({"status": "Success", "machine_id": machine.id})
+            
+        except OperationalError:
+            return Response({"error": "Machine is currently being accessed. Try again."}, status=status.HTTP_409_CONFLICT)
         except Machine.DoesNotExist:
             return Response({"error": "Machine not found."}, status=status.HTTP_404_NOT_FOUND)
-
 
 class MachineLeaveView(APIView):
-    """Gracefully vacates a machine."""
     permission_classes = [IsAuthenticated]
     
-    @transaction.atomic
     def post(self, request, machine_id):
-        try:
-            machine = Machine.objects.select_for_update().get(id=machine_id)
-            if machine.current_player == request.user:
-                machine.is_occupied = False
-                machine.current_player = None
-                machine.last_ping = None
-                machine.save()
-
-                async_to_sync(get_channel_layer().group_send)(
-                    'global_casino_floor', 
-                    {'type': 'machine_update', 'machine_id': machine.id, 'is_occupied': False}
-                )
+        # Direct atomic UPDATE avoids select_for_update deadlocks
+        updated = Machine.objects.filter(id=machine_id, current_player=request.user).update(
+            is_occupied=False, current_player=None, last_ping=None
+        )
+        
+        if updated:
+            async_to_sync(get_channel_layer().group_send)(
+                'global_casino_floor', 
+                {'type': 'machine_update', 'machine_id': machine_id, 'is_occupied': False}
+            )
             return Response({"status": "Success"})
-        except Machine.DoesNotExist:
-            return Response({"error": "Machine not found."}, status=status.HTTP_404_NOT_FOUND)
-
+        return Response({"error": "Machine not found or not owned by you."}, status=status.HTTP_404_NOT_FOUND)
 
 class MachineHeartbeatView(APIView):
-    """Maintains the active session lock."""
     permission_classes = [IsAuthenticated]
     
     def post(self, request, machine_id):
-        try:
-            machine = Machine.objects.get(id=machine_id, current_player=request.user)
-            machine.last_ping = timezone.now()
-            machine.save(update_fields=['last_ping'])
+        # High-performance atomic update. Bypasses Python memory and row locks entirely.
+        updated = Machine.objects.filter(id=machine_id, current_player=request.user).update(last_ping=timezone.now())
+        if updated:
             return Response({"status": "alive", "ttl": 60})
-        except Machine.DoesNotExist:
-            return Response({"error": "Ownership revoked or machine expired."}, status=status.HTTP_403_FORBIDDEN)
-
+        return Response({"error": "Ownership revoked or machine expired."}, status=status.HTTP_403_FORBIDDEN)
 
 # ==============================================================================
 # CORE GAME ENGINE ROUTING
 # ==============================================================================
 class SpinView(APIView):
-    """Validates parameters, enforces machine ownership, and triggers math engine."""
     permission_classes = [IsAuthenticated]
     throttle_classes = [SpinRateThrottle]
     
@@ -158,18 +133,11 @@ class SpinView(APIView):
         bet_amount = serializer.validated_data['bet_amount']
         machine_id = serializer.validated_data.get('machine_id')
 
-        # Strict Ownership Guard
         if machine_id:
-            try:
-                machine = Machine.objects.get(id=machine_id)
-                if machine.current_player != request.user:
-                    return Response({"error": "You do not have a lock on this machine."}, status=status.HTTP_403_FORBIDDEN)
-                
-                # Implicit Heartbeat on Spin
-                machine.last_ping = timezone.now()
-                machine.save(update_fields=['last_ping'])
-            except Machine.DoesNotExist:
-                pass
+            # High-performance verification and ping update in a single SQL query
+            updated = Machine.objects.filter(id=machine_id, current_player=request.user).update(last_ping=timezone.now())
+            if not updated:
+                return Response({"error": "You do not have a lock on this machine."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             result = process_spin(
@@ -182,10 +150,13 @@ class SpinView(APIView):
             
         except ValueError as e: 
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except OperationalError as e:
+            # CRITICAL FIX: Catch DB Locks (Concurrent Spin Taps) and reject gracefully
+            logger.warning(f"DB Lock Contention [User {request.user.id}]: {str(e)}")
+            return Response({"error": "Processing previous spin. Please wait a moment."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         except Exception as e: 
             logger.error(f"Engine Crash [User {request.user.id}]: {str(e)}", exc_info=True)
             return Response({"error": f"Math Engine Error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 50
@@ -193,24 +164,20 @@ class StandardResultsSetPagination(PageNumberPagination):
     max_page_size = 100
 
 class SpinHistoryView(generics.ListAPIView):
-    """Paginated spin ledger for the user."""
     serializer_class = SpinHistorySerializer
     permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsSetPagination
     
     def get_queryset(self): 
-        return SpinHistory.objects.filter(user=self.request.user).select_related('island')
-
+        return SpinHistory.objects.filter(user=self.request.user).select_related('island').order_by('-timestamp')
 
 # ==============================================================================
 # TELEMETRY & ANALYTICS (BANKER PORTAL)
 # ==============================================================================
 class HouseAnalyticsView(APIView):
-    """Aggregates global RTP, House Edge, and Profitability per sector."""
     permission_classes = [IsAdminUser]
     
     def get(self, request):
-        # Global Stats
         global_stats = SpinHistory.objects.aggregate(
             total_spins=Count('id'), 
             total_wagered=Sum('bet_amount'), 
@@ -221,7 +188,6 @@ class HouseAnalyticsView(APIView):
         g_paid_out = global_stats['total_paid_out'] or Decimal('0.00')
         g_rtp = float((g_paid_out / g_wagered * 100) if g_wagered > 0 else Decimal('0.00'))
 
-        # Island Breakdown
         island_stats = list(SpinHistory.objects.values(
             island_name=F('island__name')
         ).annotate(
