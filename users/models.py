@@ -36,7 +36,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     
     # User Type & Referral System
     user_type = models.CharField(max_length=10, choices=USER_TYPES, default='NORMAL')
-    referral_code = models.CharField(max_length=8, unique=True, blank=True)
+    
+    # CRITICAL FIX: Added null=True. 
+    # This prevents the UniqueConstraint crash on existing database rows.
+    referral_code = models.CharField(max_length=8, unique=True, blank=True, null=True)
+    
     referred_by = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='referrals')
     commission_balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     total_commission_earned = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
