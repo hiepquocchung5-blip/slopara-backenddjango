@@ -22,8 +22,12 @@ from .utils import process_spin
 logger = logging.getLogger(__name__)
 
 class SpinRateThrottle(UserRateThrottle):
+    """
+    Protects the math engine. Allows 5 spins per second PER USER. 
+    10,000 different users can spin simultaneously without triggering this.
+    """
     scope = 'spin'
-    rate = '3/second' # Increased slightly to allow fast physical taps, DB locks will handle the rest
+    rate = '5/second' 
 
 # ==============================================================================
 # CASINO FLOOR & MACHINE MANAGEMENT
@@ -95,7 +99,6 @@ class MachineLeaveView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request, machine_id):
-        # Direct atomic UPDATE avoids select_for_update deadlocks
         updated = Machine.objects.filter(id=machine_id, current_player=request.user).update(
             is_occupied=False, current_player=None, last_ping=None
         )
@@ -112,7 +115,6 @@ class MachineHeartbeatView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request, machine_id):
-        # High-performance atomic update. Bypasses Python memory and row locks entirely.
         updated = Machine.objects.filter(id=machine_id, current_player=request.user).update(last_ping=timezone.now())
         if updated:
             return Response({"status": "alive", "ttl": 60})
@@ -134,7 +136,6 @@ class SpinView(APIView):
         machine_id = serializer.validated_data.get('machine_id')
 
         if machine_id:
-            # High-performance verification and ping update in a single SQL query
             updated = Machine.objects.filter(id=machine_id, current_player=request.user).update(last_ping=timezone.now())
             if not updated:
                 return Response({"error": "You do not have a lock on this machine."}, status=status.HTTP_403_FORBIDDEN)
@@ -151,7 +152,6 @@ class SpinView(APIView):
         except ValueError as e: 
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except OperationalError as e:
-            # CRITICAL FIX: Catch DB Locks (Concurrent Spin Taps) and reject gracefully
             logger.warning(f"DB Lock Contention [User {request.user.id}]: {str(e)}")
             return Response({"error": "Processing previous spin. Please wait a moment."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         except Exception as e: 
