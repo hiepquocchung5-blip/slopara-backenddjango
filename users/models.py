@@ -59,7 +59,6 @@ class User(AbstractBaseUser, PermissionsMixin):
     REQUIRED_FIELDS = []
 
     def save(self, *args, **kwargs):
-        # Auto-generate referral code on creation safely (SQLite-friendly)
         if not self.referral_code:
             while True:
                 code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
@@ -69,7 +68,6 @@ class User(AbstractBaseUser, PermissionsMixin):
         super().save(*args, **kwargs)
 
     def get_commission_rate(self):
-        """Returns the percentage multiplier of the base referral pool."""
         if self.user_type == 'VIP': return Decimal('1.00')
         if self.user_type == 'AGENT': return Decimal('0.25')
         return Decimal('0.00')
