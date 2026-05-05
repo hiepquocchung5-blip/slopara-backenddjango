@@ -37,9 +37,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     # User Type & Referral System
     user_type = models.CharField(max_length=10, choices=USER_TYPES, default='NORMAL')
     
-    # CRITICAL FIX: Added null=True. 
-    # This prevents the UniqueConstraint crash on existing database rows.
-    referral_code = models.CharField(max_length=8, unique=True, blank=True, null=True)
+    # CRITICAL FIX: Removed `unique=True` at the DB schema level to bypass SQLite's 
+    # migration crash on existing rows. We enforce uniqueness in the save() method instead.
+    referral_code = models.CharField(max_length=8, blank=True, null=True)
     
     referred_by = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='referrals')
     commission_balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
@@ -66,7 +66,13 @@ class User(AbstractBaseUser, PermissionsMixin):
     def save(self, *args, **kwargs):
         # Auto-generate a secure 8-character alphanumeric referral code on creation
         if not self.referral_code:
-            self.referral_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+            # Programmatic uniqueness check to guarantee no collisions 
+            # even without the DB-level unique constraint.
+            while True:
+                code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+                if not User.objects.filter(referral_code=code).exists():
+                    self.referral_code = code
+                    break
         super().save(*args, **kwargs)
 
     def get_commission_rate(self):
