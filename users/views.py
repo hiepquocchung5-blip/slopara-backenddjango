@@ -7,10 +7,23 @@ from django.db import transaction
 from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal
-from .serializers import RegisterSerializer, UserSerializer, LeaderboardSerializer
+from rest_framework_simplejwt.views import TokenObtainPairView
+
+from .serializers import (
+    RegisterSerializer, 
+    UserSerializer, 
+    LeaderboardSerializer,
+    SingleDeviceTokenSerializer,
+    NotificationSerializer
+)
 from .models import Notification
 
 User = get_user_model()
+
+# --- AUTH & PROFILE ---
+class SingleDeviceLoginView(TokenObtainPairView):
+    """Overrides default login to embed Single-Device Validation Stamps"""
+    serializer_class = SingleDeviceTokenSerializer
 
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -45,6 +58,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
 
         return Response(serializer.data)
 
+# --- RETENTION & REFERRALS ---
 class DailyBonusClaimView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -82,13 +96,6 @@ class DailyBonusClaimView(APIView):
             "streak": user.consecutive_logins
         })
 
-class LeaderboardView(generics.ListAPIView):
-    serializer_class = LeaderboardSerializer
-    # CRITICAL FIX: Allow public access for the unauthenticated Landing Page
-    permission_classes = [AllowAny]
-    def get_queryset(self):
-        return User.objects.filter(lifetime_deposit__gt=0).order_by('-lifetime_deposit')[:50]
-
 class ReferralDashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -118,12 +125,14 @@ class ReferralDashboardView(APIView):
 
         return Response({"message": "Commission transferred to main wallet.", "claimed_amount": str(amount), "new_balance": str(user.balance)})
 
-from rest_framework import serializers
 
-class NotificationSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Notification
-        fields = ('id', 'title', 'message', 'is_read', 'created_at')
+# --- PUBLIC & SOCIAL ---
+class LeaderboardView(generics.ListAPIView):
+    serializer_class = LeaderboardSerializer
+    permission_classes = [AllowAny]
+    
+    def get_queryset(self):
+        return User.objects.filter(lifetime_deposit__gt=0).order_by('-lifetime_deposit')[:50]
 
 class NotificationListView(generics.ListAPIView):
     serializer_class = NotificationSerializer
@@ -142,6 +151,7 @@ class NotificationReadView(APIView):
         except Notification.DoesNotExist:
             return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
 
+# --- BANKER / ADMIN ENGINE ---
 class BankerPlayerListView(generics.ListAPIView):
     permission_classes = [IsAdminUser]
     serializer_class = UserSerializer

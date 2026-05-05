@@ -1,16 +1,23 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
-    RegisterView, UserProfileView, NotificationListView, NotificationReadView,
-    LeaderboardView, DailyBonusClaimView, BankerPlayerListView, BankerPlayerToggleBanView,
-    ReferralDashboardView
+    RegisterView, 
+    SingleDeviceLoginView, # CRITICAL FIX: Imported our custom Stateful JWT view
+    UserProfileView, 
+    NotificationListView, 
+    NotificationReadView,
+    LeaderboardView,
+    DailyBonusClaimView,
+    ReferralDashboardView,
+    BankerPlayerListView,
+    BankerPlayerToggleBanView
 )
-from .serializers import SingleDeviceTokenSerializer
 
 urlpatterns = [
     # Authentication endpoints
     path('register/', RegisterView.as_view(), name='auth_register'),
-    path('login/', TokenObtainPairView.as_view(serializer_class=SingleDeviceTokenSerializer), name='auth_login'),
+    # CRITICAL FIX: Used SingleDeviceLoginView so the security stamp is properly injected into the token
+    path('login/', SingleDeviceLoginView.as_view(), name='auth_login'), 
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     
     # Profile, Referrals & Retention
