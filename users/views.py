@@ -12,7 +12,6 @@ from .models import Notification
 
 User = get_user_model()
 
-# --- AUTH & PROFILE ---
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     permission_classes = (AllowAny,)
@@ -46,7 +45,6 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
 
         return Response(serializer.data)
 
-# --- DAILY BONUS ENGINE ---
 class DailyBonusClaimView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -55,14 +53,12 @@ class DailyBonusClaimView(APIView):
         user = User.objects.select_for_update().get(id=request.user.id)
         now = timezone.now()
 
-        # Enforce 24-hour cooldown
         if user.last_daily_bonus_claim and now < user.last_daily_bonus_claim + timedelta(hours=24):
             time_left = (user.last_daily_bonus_claim + timedelta(hours=24)) - now
             hours, remainder = divmod(time_left.seconds, 3600)
             minutes, _ = divmod(remainder, 60)
             return Response({"error": f"Check back in {hours}h {minutes}m."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Calculate Consecutive Streak
         if user.last_daily_bonus_claim and now > user.last_daily_bonus_claim + timedelta(hours=48):
             user.consecutive_logins = 1
         else:
@@ -86,12 +82,41 @@ class DailyBonusClaimView(APIView):
             "streak": user.consecutive_logins
         })
 
-# --- LEADERBOARD & INBOX ---
 class LeaderboardView(generics.ListAPIView):
     serializer_class = LeaderboardSerializer
-    permission_classes = [IsAuthenticated]
+    # CRITICAL FIX: Allow public access for the unauthenticated Landing Page
+    permission_classes = [AllowAny]
     def get_queryset(self):
         return User.objects.filter(lifetime_deposit__gt=0).order_by('-lifetime_deposit')[:50]
+
+class ReferralDashboardView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        return Response({
+            "referral_code": user.referral_code,
+            "user_type": user.user_type,
+            "total_referrals": user.referrals.count(),
+            "commission_balance": str(user.commission_balance),
+            "total_commission_earned": str(user.total_commission_earned)
+        })
+
+    @transaction.atomic
+    def post(self, request):
+        user = User.objects.select_for_update().get(id=request.user.id)
+        
+        amount = user.commission_balance
+        if amount <= 0:
+            return Response({"error": "No commission available to claim."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        user.balance += amount
+        user.commission_balance = Decimal('0.00')
+        user.save(update_fields=['balance', 'commission_balance'])
+
+        Notification.objects.create(user=user, title="Commission Claimed 💰", message=f"You successfully transferred {amount} MMK in referral commissions to your main wallet!")
+
+        return Response({"message": "Commission transferred to main wallet.", "claimed_amount": str(amount), "new_balance": str(user.balance)})
 
 from rest_framework import serializers
 
@@ -117,47 +142,6 @@ class NotificationReadView(APIView):
         except Notification.DoesNotExist:
             return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
 
-# --- REFERRAL & COMMISSION ENGINE ---
-class ReferralDashboardView(APIView):
-    """Fetches real-time stats and handles commission claiming to main balance."""
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        user = request.user
-        return Response({
-            "referral_code": user.referral_code,
-            "user_type": user.user_type,
-            "total_referrals": user.referrals.count(),
-            "commission_balance": str(user.commission_balance),
-            "total_commission_earned": str(user.total_commission_earned)
-        })
-
-    @transaction.atomic
-    def post(self, request):
-        user = User.objects.select_for_update().get(id=request.user.id)
-        
-        amount = user.commission_balance
-        if amount <= 0:
-            return Response({"error": "No commission available to claim."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Transfer commission liquidity to main playable balance
-        user.balance += amount
-        user.commission_balance = Decimal('0.00')
-        user.save(update_fields=['balance', 'commission_balance'])
-
-        Notification.objects.create(
-            user=user,
-            title="Commission Claimed 💰",
-            message=f"You successfully transferred {amount} MMK in referral commissions to your main wallet!"
-        )
-
-        return Response({
-            "message": "Commission transferred to main wallet.",
-            "claimed_amount": str(amount),
-            "new_balance": str(user.balance)
-        })
-    
-# --- BANKER / ADMIN ENGINE ---
 class BankerPlayerListView(generics.ListAPIView):
     permission_classes = [IsAdminUser]
     serializer_class = UserSerializer

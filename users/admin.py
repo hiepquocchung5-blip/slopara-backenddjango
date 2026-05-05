@@ -13,7 +13,7 @@ class CustomUserAdmin(admin.ModelAdmin):
         'lifetime_deposit', 
         'is_profile_verified', 
         'is_active', 
-        'date_joined'
+        'created_at'  # CRITICAL FIX: Changed from date_joined to created_at
     )
     
     # 2. Filters for quick sorting
@@ -23,8 +23,8 @@ class CustomUserAdmin(admin.ModelAdmin):
     search_fields = ('phone_number', 'username')
     
     # 4. Protect critical timestamp fields
-    readonly_fields = ('date_joined', 'last_login')
-    ordering = ('-date_joined',)
+    readonly_fields = ('created_at', 'last_login') # CRITICAL FIX: Changed from date_joined
+    ordering = ('-created_at',) # CRITICAL FIX: Changed from date_joined
 
     # 5. Form Layout: Hides the password field to prevent plaintext saving issues
     # while organizing the remaining data into clean sections.
@@ -42,7 +42,7 @@ class CustomUserAdmin(admin.ModelAdmin):
             'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')
         }),
         ('Timestamps', {
-            'fields': ('date_joined',)
+            'fields': ('created_at',) # CRITICAL FIX: Changed from date_joined
         }),
     )
 

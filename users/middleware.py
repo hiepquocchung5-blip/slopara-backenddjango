@@ -9,11 +9,15 @@ from urllib.parse import parse_qs
 User = get_user_model()
 
 @database_sync_to_async
-def get_user(user_id):
+def get_user_with_stamp_validation(user_id, token_stamp):
+    """Validates user and enforces single-device stamp for WebSockets."""
     try:
-        return User.objects.get(id=user_id)
+        user = User.objects.get(id=user_id)
+        if str(user.security_stamp) == token_stamp:
+            return user
     except User.DoesNotExist:
-        return AnonymousUser()
+        pass
+    return AnonymousUser()
 
 class JWTAuthMiddleware(BaseMiddleware):
     """
@@ -28,10 +32,11 @@ class JWTAuthMiddleware(BaseMiddleware):
 
         if token:
             try:
-                # Delegate validation to SimpleJWT securely
                 validated_token = UntypedToken(token)
                 user_id = validated_token.payload.get('user_id')
-                scope['user'] = await get_user(user_id)
+                stamp = validated_token.payload.get('stamp')
+                
+                scope['user'] = await get_user_with_stamp_validation(user_id, stamp)
             except (InvalidToken, TokenError):
                 scope['user'] = AnonymousUser()
         else:

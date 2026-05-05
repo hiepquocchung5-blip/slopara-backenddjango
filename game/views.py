@@ -1,7 +1,7 @@
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated, IsAdminUser , AllowAny
 from django.db import transaction
 from django.db.models import Sum, Count
 from django.utils import timezone
@@ -23,7 +23,7 @@ class SpinRateThrottle(UserRateThrottle):
 class IslandListView(generics.ListAPIView):
     queryset = Island.objects.all().order_by('min_lifetime_deposit')
     serializer_class = IslandSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]  # Public endpoint to view available islands
 
 class IslandMachinesView(generics.ListAPIView):
     serializer_class = MachineSerializer
