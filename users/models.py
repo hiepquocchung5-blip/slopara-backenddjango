@@ -1,11 +1,10 @@
+import random
+import string
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from decimal import Decimal
 
 class CustomUserManager(BaseUserManager):
-    """
-    Custom manager to handle Phone Number based authentication instead of usernames/emails.
-    """
     def create_user(self, phone_number, password=None, **extra_fields):
         if not phone_number:
             raise ValueError('The Phone Number field must be set')
@@ -19,24 +18,30 @@ class CustomUserManager(BaseUserManager):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
         extra_fields.setdefault('is_active', True)
-
-        if extra_fields.get('is_staff') is not True:
-            raise ValueError('Superuser must have is_staff=True.')
-        if extra_fields.get('is_superuser') is not True:
-            raise ValueError('Superuser must have is_superuser=True.')
+        extra_fields.setdefault('user_type', 'VIP') # Admins are VIPs by default
 
         return self.create_user(phone_number, password, **extra_fields)
 
 
 class User(AbstractBaseUser, PermissionsMixin):
-    """
-    Core Player Identity & Wallet Model
-    """
+    USER_TYPES = (
+        ('NORMAL', 'Normal Player'),
+        ('AGENT', 'Agent (25% Commission)'),
+        ('VIP', 'VIP (100% Commission)'),
+    )
+
     phone_number = models.CharField(max_length=15, unique=True, db_index=True)
     username = models.CharField(max_length=50, unique=True, null=True, blank=True)
     is_profile_verified = models.BooleanField(default=False)
     
-    # Financials (Using Decimal to prevent floating point math errors)
+    # User Type & Referral System
+    user_type = models.CharField(max_length=10, choices=USER_TYPES, default='NORMAL')
+    referral_code = models.CharField(max_length=8, unique=True, blank=True)
+    referred_by = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='referrals')
+    commission_balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    total_commission_earned = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+
+    # Financials
     balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     lifetime_deposit = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     
@@ -54,14 +59,23 @@ class User(AbstractBaseUser, PermissionsMixin):
     USERNAME_FIELD = 'phone_number'
     REQUIRED_FIELDS = []
 
+    def save(self, *args, **kwargs):
+        # Auto-generate a secure 8-character alphanumeric referral code on creation
+        if not self.referral_code:
+            self.referral_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        super().save(*args, **kwargs)
+
+    def get_commission_rate(self):
+        """Returns the percentage multiplier of the base referral pool."""
+        if self.user_type == 'VIP': return Decimal('1.00')    # 100%
+        if self.user_type == 'AGENT': return Decimal('0.25')  # 25%
+        return Decimal('0.00')                                # 0%
+
     def __str__(self):
-        return self.username if self.username else self.phone_number
+        return f"[{self.user_type}] {self.username if self.username else self.phone_number}"
 
 
 class Notification(models.Model):
-    """
-    Persistent Player Inbox System
-    """
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     title = models.CharField(max_length=255)
     message = models.TextField()

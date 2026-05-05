@@ -1,6 +1,5 @@
 from rest_framework import serializers
-from decimal import Decimal
-from .models import Island, GJP_Pool, SpinHistory, Machine
+from .models import Island, GJP_Pool, SpinHistory, Machine, PlayerGameState
 
 class GJPPoolSerializer(serializers.ModelSerializer):
     class Meta:
@@ -26,10 +25,20 @@ class MachineSerializer(serializers.ModelSerializer):
 
 class SpinRequestSerializer(serializers.Serializer):
     island_id = serializers.IntegerField()
-    machine_id = serializers.IntegerField(required=False, allow_null=True) # FIXED: Accepts machine_id
+    machine_id = serializers.IntegerField(required=False, allow_null=True)
     bet_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+    def validate_bet_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Bet amount must be greater than zero.")
+        return value
 
 class SpinHistorySerializer(serializers.ModelSerializer):
     class Meta:
         model = SpinHistory
         fields = ('bet_amount', 'win_amount', 'symbols_matrix', 'lines_won', 'is_gjp_win', 'timestamp')
+
+class PlayerGameStateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PlayerGameState
+        fields = ('free_spins_remaining', 'locked_bet_amount')

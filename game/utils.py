@@ -1,53 +1,107 @@
 import random
 from decimal import Decimal
 from django.db import transaction
+from django.db.models import F
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from .models import GJP_Pool, SpinHistory, Machine, PlayerGameState
 from users.models import User
 
-# Fail-safe local engine in case 'engines' folder is missing/malformed
+# ==============================================================================
+# FALLBACK ENGINE (V9.2 Architecture)
+# Operates if the `engines` module fails to load, preventing complete downtime.
+# ==============================================================================
 try:
     from .engines import get_engine
 except ImportError:
     def get_engine(island_id):
         class FallbackEngine:
+            SYMBOLS = ['GJP', 'LOGO', '7', 'Melon', 'Bell', 'Cherry', 'Replay']
+            PAYOUTS = {
+                'LOGO': Decimal('25.0'), '7': Decimal('10.0'), 'Melon': Decimal('5.0'), 
+                'Bell': Decimal('3.0'), 'Cherry': Decimal('2.0'), 'Replay': Decimal('0.0')
+            }
+            # V9.2 Cumulative Probabilities (31.2% Hit Rate)
+            PROB_THRESHOLDS = [
+                (0.150, 'Replay'), (0.225, 'Cherry'), (0.280, 'Bell'),
+                (0.302, 'Melon'), (0.310, '7'), (0.312, 'LOGO')
+            ]
+            LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 4, 8], [2, 4, 6]]
+
             def __init__(self, island, pool, bet_amount):
-                self.island, self.pool, self.bet_amount = island, pool, bet_amount
+                self.island = island
+                self.pool = pool
+                self.bet_amount = Decimal(str(bet_amount))
+
+            def _has_accidental_win(self, flat_grid):
+                """Scans to ensure dead spins don't accidentally align."""
+                for line in self.LINES:
+                    if flat_grid[line[0]] == flat_grid[line[1]] == flat_grid[line[2]]:
+                        return True
+                return False
+
             def execute_spin(self):
-                SYMBOLS = ['GJP', 'LOGO', '7', 'Melon', 'Bell', 'Cherry', 'Replay']
-                PAYOUTS = {'LOGO': Decimal('100.0'), '7': Decimal('50.0'), 'Melon': Decimal('20.0'), 'Bell': Decimal('10.0'), 'Cherry': Decimal('5.0'), 'Replay': Decimal('1.0')}
-                weights = [0.01, 1, 3, 10, 20, 30, 35.99]
+                gjp_won = False
+                win_amount = Decimal('0.0')
+                free_spins = 0
+                multiplier = 1
+                result_sym = None
+                lines_won = []
+
+                # 1. GJP Roll (Simplified for fallback stability)
+                gjp_val = float(self.pool.current_value)
+                min_gjp = float(self.pool.hot_trigger)
+                ceil_gjp = float(self.pool.must_hit_value)
                 
-                force_gjp = self.pool.current_value >= self.pool.must_hit_value
-                if force_gjp: weights = [100, 0, 0, 0, 0, 0, 0]
+                if gjp_val >= ceil_gjp:
+                    gjp_won = True
+                    result_sym = 'GJP'
+                else:
+                    progress = max(0.0, min(1.0, (gjp_val - min_gjp) / (ceil_gjp - min_gjp) if ceil_gjp > min_gjp else 0))
+                    prob = 0.00001 * (1 + progress * 3)
+                    if random.random() < prob:
+                        gjp_won = True
+                        result_sym = 'GJP'
+                    else:
+                        # 2. Base Game Roll
+                        r = random.random()
+                        for thresh, sym in self.PROB_THRESHOLDS:
+                            if r < thresh:
+                                result_sym = sym
+                                break
+
+                # 3. Payout Calculation
+                if result_sym == 'Replay':
+                    free_spins = 1
+                elif result_sym and result_sym != 'GJP':
+                    win_amount = self.bet_amount * self.PAYOUTS[result_sym]
+
+                # 4. Grid Generation
+                flat_grid = [random.choice(self.SYMBOLS) for _ in range(9)]
+                if result_sym:
+                    chosen_line = random.randint(0, 4)
+                    lines_won.append(chosen_line)
+                    for pos in self.LINES[chosen_line]:
+                        flat_grid[pos] = result_sym
+                else:
+                    while self._has_accidental_win(flat_grid):
+                        flat_grid = [random.choice(self.SYMBOLS) for _ in range(9)]
+
+                matrix = [flat_grid[0:3], flat_grid[3:6], flat_grid[6:9]]
                 
-                matrix = [[random.choices(SYMBOLS, weights=weights)[0] for _ in range(3)] for _ in range(3)]
-                win_amount, gjp_won, lines_won, free_spins, multiplier = Decimal('0.0'), False, [], 0, 1
-                
-                lines = [matrix[0], matrix[1], matrix[2], [matrix[0][0], matrix[1][1], matrix[2][2]], [matrix[0][2], matrix[1][1], matrix[2][0]]]
-                for idx, line in enumerate(lines):
-                    if line[0] == line[1] == line[2]:
-                        sym = line[0]
-                        if sym == 'GJP':
-                            gjp_won, lines_won = True, lines_won + [idx]
-                        elif sym in PAYOUTS:
-                            win_amount += self.bet_amount * PAYOUTS[sym]
-                            lines_won.append(idx)
-                            if sym == '7': free_spins += 10
-                
-                if force_gjp and not gjp_won:
-                    matrix = [['7', 'Melon', 'Cherry'], ['GJP', 'GJP', 'GJP'], ['Bell', 'Replay', 'LOGO']]
-                    gjp_won, lines_won = True, lines_won + [1]
-                    
                 return matrix, win_amount, gjp_won, lines_won, free_spins, multiplier
         return FallbackEngine
 
+
+# ==============================================================================
+# TRANSACTIONAL SPIN PROCESSOR
+# ==============================================================================
 @transaction.atomic
 def process_spin(user_id, island_id, bet_amount, machine_id=None):
     bet_amount = Decimal(str(bet_amount))
     
-    user = User.objects.select_for_update().get(id=user_id)
+    # We select_related to access the referrer's user_type without hitting the DB twice
+    user = User.objects.select_related('referred_by').select_for_update().get(id=user_id)
     pool = GJP_Pool.objects.select_for_update().get(island_id=island_id)
     
     try:
@@ -62,12 +116,31 @@ def process_spin(user_id, island_id, bet_amount, machine_id=None):
     else:
         if user.balance < bet_amount:
             raise ValueError("Insufficient balance")
+        
         user.balance -= bet_amount
         pool.current_value += (bet_amount * pool.contribution_rate)
+
+        # =========================================================================
+        # CFO ENGINE: DISTRIBUTE REFERRAL COMMISSIONS (ONLY ON PAID BASE SPINS)
+        # =========================================================================
+        if user.referred_by_id:
+            base_commission_pool = bet_amount * Decimal('0.01') # 1% Base Pool
+            commission_rate = user.referred_by.get_commission_rate()
+            
+            if commission_rate > 0:
+                final_commission = base_commission_pool * commission_rate
+                
+                # CRITICAL ENGINEERING: Lock-free F() expression prevents DB deadlocks
+                User.objects.filter(id=user.referred_by_id).update(
+                    commission_balance=F('commission_balance') + final_commission,
+                    total_commission_earned=F('total_commission_earned') + final_commission
+                )
+        # =========================================================================
 
     EngineClass = get_engine(island_id)
     engine = EngineClass(island=pool.island, pool=pool, bet_amount=bet_amount)
     
+    # Handle both old 5-return engines and new 6-return engines safely
     result = engine.execute_spin()
     if len(result) == 5:
         matrix, win_amount, gjp_won, lines_won, free_spins_awarded = result
@@ -75,6 +148,7 @@ def process_spin(user_id, island_id, bet_amount, machine_id=None):
     else:
         matrix, win_amount, gjp_won, lines_won, free_spins_awarded, multiplier = result
 
+    # State processing
     if game_state:
         if is_free_spin:
             game_state.free_spins_remaining -= 1
@@ -87,6 +161,7 @@ def process_spin(user_id, island_id, bet_amount, machine_id=None):
             game_state.locked_bet_amount = bet_amount
         game_state.save()
 
+    # Jackpot logic
     if gjp_won:
         jackpot_amount = pool.current_value
         win_amount += jackpot_amount
@@ -123,7 +198,6 @@ def process_spin(user_id, island_id, bet_amount, machine_id=None):
         })
     except Exception: pass
 
-    # CRITICAL FIX: Cast Decimals to Strings
     return {
         'matrix': matrix,
         'win_amount': str(win_amount),

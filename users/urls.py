@@ -3,7 +3,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .views import (
     RegisterView, UserProfileView, LeaderboardView, 
     NotificationListView, NotificationReadView, DailyBonusClaimView,
-    BankerPlayerListView, BankerPlayerToggleBanView
+    BankerPlayerListView, BankerPlayerToggleBanView,
+    ReferralDashboardView
 )
 
 urlpatterns = [
@@ -16,6 +17,9 @@ urlpatterns = [
     path('profile/', UserProfileView.as_view(), name='user_profile'),
     path('daily-bonus/', DailyBonusClaimView.as_view(), name='daily_bonus'),
     path('leaderboard/', LeaderboardView.as_view(), name='leaderboard'),
+    
+    # Agents & Commissions
+    path('referrals/', ReferralDashboardView.as_view(), name='referral_dashboard'),
     
     # Inbox
     path('notifications/', NotificationListView.as_view(), name='notifications'),

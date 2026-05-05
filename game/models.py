@@ -29,6 +29,7 @@ class Machine(models.Model):
     machine_number = models.IntegerField()
     is_occupied = models.BooleanField(default=False)
     current_player = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    last_ping = models.DateTimeField(null=True, blank=True) # Used for AFK Eviction
 
     class Meta:
         unique_together = ('island', 'floor', 'machine_number')
@@ -37,7 +38,7 @@ class Machine(models.Model):
 class SpinHistory(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='spins')
     island = models.ForeignKey(Island, on_delete=models.SET_NULL, null=True)
-    machine = models.ForeignKey(Machine, on_delete=models.SET_NULL, null=True, blank=True) # FIXED: Added Machine
+    machine = models.ForeignKey(Machine, on_delete=models.SET_NULL, null=True, blank=True)
     bet_amount = models.DecimalField(max_digits=10, decimal_places=2)
     win_amount = models.DecimalField(max_digits=12, decimal_places=2)
     symbols_matrix = models.JSONField() 
@@ -51,8 +52,11 @@ class SpinHistory(models.Model):
             models.Index(fields=['user', '-timestamp']),
         ]
 
-# FIXED: Added PlayerGameState to track persistent Fever Mode / Free Spins
 class PlayerGameState(models.Model):
+    """
+    Persistent state tracking. If a user disconnects during Free Spins, 
+    they resume exactly where they left off when they reconnect.
+    """
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='game_states')
     island = models.ForeignKey(Island, on_delete=models.CASCADE)
     free_spins_remaining = models.IntegerField(default=0)

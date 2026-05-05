@@ -117,6 +117,46 @@ class NotificationReadView(APIView):
         except Notification.DoesNotExist:
             return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
 
+# --- REFERRAL & COMMISSION ENGINE ---
+class ReferralDashboardView(APIView):
+    """Fetches real-time stats and handles commission claiming to main balance."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        return Response({
+            "referral_code": user.referral_code,
+            "user_type": user.user_type,
+            "total_referrals": user.referrals.count(),
+            "commission_balance": str(user.commission_balance),
+            "total_commission_earned": str(user.total_commission_earned)
+        })
+
+    @transaction.atomic
+    def post(self, request):
+        user = User.objects.select_for_update().get(id=request.user.id)
+        
+        amount = user.commission_balance
+        if amount <= 0:
+            return Response({"error": "No commission available to claim."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Transfer commission liquidity to main playable balance
+        user.balance += amount
+        user.commission_balance = Decimal('0.00')
+        user.save(update_fields=['balance', 'commission_balance'])
+
+        Notification.objects.create(
+            user=user,
+            title="Commission Claimed 💰",
+            message=f"You successfully transferred {amount} MMK in referral commissions to your main wallet!"
+        )
+
+        return Response({
+            "message": "Commission transferred to main wallet.",
+            "claimed_amount": str(amount),
+            "new_balance": str(user.balance)
+        })
+    
 # --- BANKER / ADMIN ENGINE ---
 class BankerPlayerListView(generics.ListAPIView):
     permission_classes = [IsAdminUser]
