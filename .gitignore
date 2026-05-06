@@ -38,7 +38,7 @@ db.sqlite3-journal
 Media and Static Files (Uploaded/Generated)
 
 media/
-staticfiles/
+
 
 Environment Variables / Secrets
 
