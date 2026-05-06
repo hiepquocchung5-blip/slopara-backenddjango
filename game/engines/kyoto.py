@@ -9,12 +9,12 @@ from game.models import SpinHistory
 class KyotoEngine(BaseSlotEngine):
     """
     Sector 01: Kyoto Zen (Island 100 V9.2 REAL HYBRID RTP70)
-    Architecture: Flag-First Lottery with Modular Grid Generation.
-    V9.2 Updates: Higher hit frequency (31.2%), adjusted payouts for longer playtime.
+    Architecture: Flag-First Lottery with Strict Visual Grid Generation.
+    V9.2 Updates: Prevents vertical conflicts to guarantee absolute player trust.
     """
     SYMBOLS = ['GJP', 'LOGO', '7', 'Melon', 'Bell', 'Cherry', 'Replay']
     
-    # 1. Exact Payouts mapped from V9.2 JS Simulation
+    # Exact Payouts mapped from V9.2 JS Simulation
     PAYOUTS = {
         'LOGO': Decimal('25.0'),   # JS: 💎
         '7': Decimal('10.0'),      # JS: 7️⃣
@@ -24,9 +24,7 @@ class KyotoEngine(BaseSlotEngine):
         'Replay': Decimal('0.0')   # JS: 🔄 (Triggers Free Spin)
     }
 
-    # 2. V9.2 Exact Cumulative Probabilities
-    # Replay(15%), Cherry(7.5%), Bell(5.5%), Melon(2.2%), 7(0.8%), LOGO(0.2%)
-    # Total Hit Probability: 31.2%
+    # Cumulative Probabilities (Total Hit Probability: 31.2%)
     PROB_THRESHOLDS = [
         (0.150, 'Replay'),
         (0.225, 'Cherry'),
@@ -36,19 +34,22 @@ class KyotoEngine(BaseSlotEngine):
         (0.312, 'LOGO'),
     ]
 
-    # 3. Hybrid GJP Constants
+    # Hybrid GJP Constants
     BASE_JP_PROB = 0.00001
     ACCEL_FACTOR = 3
     TARGET_RTP = 0.67
     RTP_SOFT_RANGE = 0.03
 
+    # CRITICAL FIX: All possible 3-in-a-row visual combinations
+    ALL_LINES = [
+        [0, 1, 2], [3, 4, 5], [6, 7, 8], # 0, 1, 2: Horizontal (Valid Paylines)
+        [0, 4, 8], [2, 4, 6],            # 3, 4: Diagonal (Valid Paylines)
+        [0, 3, 6], [1, 4, 7], [2, 5, 8]  # 5, 6, 7: Vertical (Visual Only - Confuses Players)
+    ]
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # 1D array indices representing the 5 winning lines
-        self.lines_indices = [
-            [0, 1, 2], [3, 4, 5], [6, 7, 8], # Horizontal
-            [0, 4, 8], [2, 4, 6]             # Diagonal
-        ]
+        self.lines_indices = self.ALL_LINES[:5] # The 5 actual paying lines
 
     # --- CORE MATH & CACHING ---
 
@@ -97,36 +98,47 @@ class KyotoEngine(BaseSlotEngine):
                 return sym
         return None
 
-    # --- GRID GENERATION ---
+    # --- STRICT GRID GENERATION ---
 
-    def _has_accidental_win(self, flat_grid: List[str]) -> bool:
-        """Scans the grid to ensure no accidental winning lines exist."""
-        for line in self.lines_indices:
+    def _has_visual_conflict(self, flat_grid: List[str], allowed_line_idx: int = -1) -> bool:
+        """
+        Scans all 8 possible straight lines (Horizontal, Diagonal, Vertical).
+        If 3 symbols match anywhere EXCEPT the intentionally forced payline, 
+        it is flagged as a conflict and rejected to protect player trust.
+        """
+        for idx, line in enumerate(self.ALL_LINES):
+            if idx == allowed_line_idx:
+                continue # Skip checking the line we intentionally forced to win
+                
             if flat_grid[line[0]] == flat_grid[line[1]] == flat_grid[line[2]]:
-                return True
+                return True # Found an accidental visual win
+                
         return False
 
     def _generate_grid(self, winning_symbol: Optional[str]) -> Tuple[List[List[str]], List[int]]:
         """Constructs a visual 3x3 matrix that mathematically matches the outcome."""
-        flat_grid = [random.choice(self.SYMBOLS) for _ in range(9)]
         lines_won = []
 
         if winning_symbol:
-            # Force the winning line
             chosen_line_idx = random.randint(0, 4)
             lines_won.append(chosen_line_idx)
             
-            for pos in self.lines_indices[chosen_line_idx]:
-                flat_grid[pos] = winning_symbol
-                
-            # Note: In a strict production environment, we should technically check 
-            # if forcing this line accidentally created a second winning line. 
-            # For simplicity and standard variance, we allow overlapping random matches here 
-            # unless strictly prohibited.
-        else:
-            # Re-roll grid entirely until it is a guaranteed dead spin
-            while self._has_accidental_win(flat_grid):
+            while True:
                 flat_grid = [random.choice(self.SYMBOLS) for _ in range(9)]
+                
+                # Force the specific winning line
+                for pos in self.lines_indices[chosen_line_idx]:
+                    flat_grid[pos] = winning_symbol
+                    
+                # Verify no OTHER line (including verticals) accidentally matched
+                if not self._has_visual_conflict(flat_grid, allowed_line_idx=chosen_line_idx):
+                    break
+        else:
+            # Dead Spin: Verify ABSOLUTELY NO 3-in-a-row matches exist anywhere
+            while True:
+                flat_grid = [random.choice(self.SYMBOLS) for _ in range(9)]
+                if not self._has_visual_conflict(flat_grid, allowed_line_idx=-1):
+                    break
 
         # Convert 1D flat grid to 2D 3x3 matrix
         matrix = [
@@ -160,7 +172,7 @@ class KyotoEngine(BaseSlotEngine):
         elif result_symbol and result_symbol != 'GJP':
             win_amount = self.bet_amount * self.PAYOUTS[result_symbol]
 
-        # 3. Visual Generation Phase
+        # 3. Visual Generation Phase (Guaranteed no visual conflicts)
         matrix, lines_won = self._generate_grid(result_symbol)
 
         return matrix, win_amount, gjp_won, lines_won, free_spins_awarded, multiplier
