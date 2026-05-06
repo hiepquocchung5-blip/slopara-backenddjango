@@ -1,16 +1,17 @@
-Virtual Environment
+==============================================================================
 
-venv/
-env/
-.venv/
+PYTHON & VIRTUAL ENVIRONMENTS
 
-Python Artifacts
+==============================================================================
 
 pycache/
 *.py[cod]
 *$py.class
 *.so
 .Python
+env/
+venv/
+.venv/
 build/
 develop-eggs/
 dist/
@@ -27,26 +28,52 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-*.pyc
-Django
+
+==============================================================================
+
+DJANGO CORE & DATABASE
+
+==============================================================================
 
 *.log
 local_settings.py
+
+Ignore local SQLite databases to prevent merge conflicts and state overwrites
+
 db.sqlite3
 db.sqlite3-journal
+*.sqlite3
 
-Media and Static Files (Uploaded/Generated)
+==============================================================================
 
-media/
+STATIC & MEDIA ASSETS (Generated / Uploaded)
 
-Environment Variables / Secrets
+==============================================================================
+
+
+If you use a generic public/ folder for Nginx serving
+
+/public/
+
+==============================================================================
+
+SECURITY & ENVIRONMENT SECRETS
+
+==============================================================================
 
 .env
 .env.local
 .env.dev
 .env.prod
+.env.staging
+*.pem
+*.key
 
-OS Generated Files
+==============================================================================
+
+OS & DOCKER GENERATED FILES
+
+==============================================================================
 
 .DS_Store
 .DS_Store?
@@ -55,15 +82,19 @@ OS Generated Files
 .Trashes
 ehthumbs.db
 Thumbs.db
+docker-compose.override.yml
+.dockerignore
 
-IDEs and Editors
+==============================================================================
+
+IDEs & EDITORS
+
+==============================================================================
 
 .vscode/
 .idea/
 *.swp
 *.swo
-
-Docker
-
-docker-compose.override.yml
-.dockerignore
+.pytest_cache/
+.coverage
+htmlcov/
