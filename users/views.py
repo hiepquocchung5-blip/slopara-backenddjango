@@ -22,7 +22,6 @@ User = get_user_model()
 
 # --- AUTH & PROFILE ---
 class SingleDeviceLoginView(TokenObtainPairView):
-    """Overrides default login to embed Single-Device Validation Stamps"""
     serializer_class = SingleDeviceTokenSerializer
 
 class RegisterView(generics.CreateAPIView):
@@ -67,6 +66,10 @@ class DailyBonusClaimView(APIView):
         user = User.objects.select_for_update().get(id=request.user.id)
         now = timezone.now()
 
+        # CRITICAL FIX: Prevent looping. If they finished 6 days, lock them out.
+        if user.consecutive_logins >= 6:
+            return Response({"error": "You have already completed the 6-Day Welcome Bonus track."}, status=status.HTTP_400_BAD_REQUEST)
+
         if user.last_daily_bonus_claim and now < user.last_daily_bonus_claim + timedelta(hours=24):
             time_left = (user.last_daily_bonus_claim + timedelta(hours=24)) - now
             hours, remainder = divmod(time_left.seconds, 3600)
@@ -78,19 +81,25 @@ class DailyBonusClaimView(APIView):
         else:
             user.consecutive_logins += 1
 
-        bonus_amount = min(1000 + (user.consecutive_logins - 1) * 500, 5000)
+        # Explicit 6-Day Reward Track
+        rewards_track = [1000, 2000, 3000, 4000, 5000, 10000]
+        
+        # Modulo removed. Uses strict list indexing.
+        index = user.consecutive_logins - 1
+        bonus_amount = rewards_track[index]
+
         user.balance += Decimal(str(bonus_amount))
         user.last_daily_bonus_claim = now
-        user.save()
+        user.save(update_fields=['balance', 'last_daily_bonus_claim', 'consecutive_logins'])
 
         Notification.objects.create(
             user=user,
-            title=f"Day {user.consecutive_logins} Streak 🎁",
-            message=f"You received {bonus_amount} MMK for your daily login bonus!"
+            title=f"Day {user.consecutive_logins} Welcome Bonus 🎁",
+            message=f"You received {bonus_amount} MMK!"
         )
 
         return Response({
-            "message": "Daily bonus claimed.",
+            "message": "Welcome bonus claimed.",
             "bonus_amount": bonus_amount,
             "new_balance": str(user.balance),
             "streak": user.consecutive_logins
