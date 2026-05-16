@@ -37,18 +37,17 @@ mv /tmp/deploy_backend.sh.bak deploy_backend.sh 2>/dev/null || true
 chmod +x deploy_backend.sh
 
 echo -e "${BLUE}[3/6] Rebuilding Docker infrastructure...${NC}"
-docker compose up -d --build
+docker-compose up -d --build
 
 echo -e "${BLUE}[4/6] Taking care of Database & Assets (Backup, Migrate, Static)...${NC}"
-# Extract a quick SQL dump of the PostgreSQL database inside the container before applying risky migrations
-docker compose exec -T $DB_CONTAINER pg_dump -U slopara_user slopara > /tmp/slopara_db_backup_$(date +%F_%H%M).sql || echo -e "${RED}Warning: DB Backup Skipped/Failed${NC}"
+docker-compose exec -T $DB_CONTAINER pg_dump -U slopara_user slopara > /tmp/slopara_db_backup_$(date +%F_%H%M).sql || echo -e "${RED}Warning: DB Backup Skipped/Failed${NC}"
 
-docker compose exec -T $CONTAINER_NAME python manage.py migrate
-docker compose exec -T $CONTAINER_NAME python manage.py collectstatic --noinput
-docker compose exec -T $CONTAINER_NAME python manage.py generate_svgs
+docker-compose exec -T $CONTAINER_NAME python manage.py migrate
+docker-compose exec -T $CONTAINER_NAME python manage.py collectstatic --noinput
+# Removed generate_svgs as it was causing the crash and is obsolete with the PNG update
 
 echo -e "${BLUE}[5/6] Restarting backend container to strictly apply changes...${NC}"
-docker compose restart $CONTAINER_NAME
+docker-compose restart $CONTAINER_NAME
 
 echo -e "${BLUE}[6/6] Pruning dangling images to prevent disk exhaustion...${NC}"
 docker image prune -f
@@ -58,4 +57,4 @@ echo -e "${GREEN} SUCCESS: Backend deployment complete!     ${NC}"
 echo -e "${GREEN} Daphne ASGI and Static Assets are ready.  ${NC}"
 echo -e "${GREEN}===========================================${NC}"
 
-docker compose logs --tail 15 $CONTAINER_NAME
+docker-compose logs --tail 15 $CONTAINER_NAME
