@@ -9,7 +9,7 @@ pycache/
 *$py.class
 *.so
 .Python
-env/
+.env/
 venv/
 .venv/
 build/
