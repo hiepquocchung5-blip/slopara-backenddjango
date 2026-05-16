@@ -10,7 +10,6 @@ PROJECT_DIR="/root/suropara/slopara-backenddjango"
 CONTAINER_NAME="backend"
 DB_CONTAINER="db"
 
-# --- COLORS ---
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
