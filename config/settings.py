@@ -11,10 +11,7 @@ SECRET_KEY = 'django-insecure-impot@6%xe1r+0!-f-ibt#da#xc!btlda1acf)vc19&m#4a^!y
 DEBUG = True
 ALLOWED_HOSTS = [
     'django.apisuro.online',
-    'slopara.com',
-    'www.slopara.com',
-    '127.0.0.1',
-    'localhost',
+    'api.suropara.com',
 ]
 
 # --- REVERSE PROXY & CSRF SECURITY ---
@@ -24,7 +21,7 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 # Explicitly whitelist your domain for CSRF form submissions (like the Admin login)
 CSRF_TRUSTED_ORIGINS = [
     'https://django.apisuro.online',
-    'https://slopara.com',
+    'https://api.suropara.com',
 ]
 
 # CRITICAL FIX: 'daphne' MUST be at the top to override runserver for WebSockets
