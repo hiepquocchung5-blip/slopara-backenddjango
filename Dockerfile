@@ -18,8 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the Django project code
 COPY . .
 
-# Expose the ASGI port for Daphne
+# Expose the ASGI port for Daphneo
 EXPOSE 8000
-
+ 
 # Start Daphne on port 8000
 CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "config.asgi:application"]
